@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>bundleid</key>
-	<string>com.rkhozinov.alfred.quick-translate</string>
+	<string>com.rkhozinov.alfred.gtranslate</string>
 	<key>connections</key>
 	<dict>
 		<key>106F3E8A-2E39-4271-926D-A914AB923F97</key>
@@ -96,7 +96,7 @@
 	<key>disabled</key>
 	<false/>
 	<key>name</key>
-	<string>Quick Translate</string>
+	<string>GTranslate</string>
 	<key>objects</key>
 	<array>
 		<dict>
