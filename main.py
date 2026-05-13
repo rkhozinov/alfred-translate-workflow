@@ -221,7 +221,12 @@ def generate_worflow_output(translations: List[str]):
 
 
 def pick_target(text: str, out_lang: str, in_lang: str) -> str:
-    return in_lang if CYRILLIC_RE.search(text) else out_lang
+    cyrillic = bool(CYRILLIC_RE.search(text))
+    if out_lang == "ru":
+        return in_lang if cyrillic else out_lang
+    if in_lang == "ru":
+        return out_lang if cyrillic else in_lang
+    return in_lang if cyrillic else out_lang
 
 
 def main_entry(text: str) -> str:

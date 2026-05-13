@@ -38,14 +38,32 @@ class TestCyrillicDetect(unittest.TestCase):
 
 
 class TestPickTarget(unittest.TestCase):
-    def test_cyrillic_picks_secondary(self):
+    # Config A: out=ru, in=en (upstream default)
+    def test_cyrillic_out_ru(self):
         self.assertEqual(main.pick_target("Привет", out_lang="ru", in_lang="en"), "en")
 
-    def test_latin_picks_primary(self):
+    def test_latin_out_ru(self):
         self.assertEqual(main.pick_target("hello", out_lang="ru", in_lang="en"), "ru")
 
-    def test_mixed_picks_secondary(self):
+    def test_mixed_out_ru(self):
         self.assertEqual(main.pick_target("hi Привет", out_lang="ru", in_lang="en"), "en")
+
+    # Config B: out=en, in=ru (user's chosen config)
+    def test_cyrillic_in_ru(self):
+        self.assertEqual(main.pick_target("Привет", out_lang="en", in_lang="ru"), "en")
+
+    def test_latin_in_ru(self):
+        self.assertEqual(main.pick_target("hello", out_lang="en", in_lang="ru"), "ru")
+
+    def test_mixed_in_ru(self):
+        self.assertEqual(main.pick_target("hi Привет", out_lang="en", in_lang="ru"), "en")
+
+    # Config C: neither side is ru — fall back to slot-position routing
+    def test_cyrillic_neither_ru(self):
+        self.assertEqual(main.pick_target("Привет", out_lang="fr", in_lang="de"), "de")
+
+    def test_latin_neither_ru(self):
+        self.assertEqual(main.pick_target("hello", out_lang="fr", in_lang="de"), "fr")
 
 
 class TestParseResponse(unittest.TestCase):
