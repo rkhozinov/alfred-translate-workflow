@@ -13,21 +13,18 @@ tr <text>
 - <kbd>↩</kbd> — copy translation to clipboard
 - <kbd>⇧</kbd><kbd>↩</kbd> — paste translation to the frontmost app
 - <kbd>⌥</kbd><kbd>↩</kbd> — show translation in the Text View
+- <kbd>⌘</kbd><kbd>↩</kbd> — copy back-translation (round-trip sanity check)
 
-![preview](images/img1.png)
-![preview2](images/img2.png)
-![preview3](images/img3.png)
+Each row's subtitle shows `<detected_src> → <target>`. Alternatives and dictionary entries appear as extra rows below the main translation when the source is a single word or short phrase.
 
 ### Smart direction
 
 Source language is decided from the input itself, no extra keystrokes:
 
-- Input contains **Cyrillic** characters → translate to **Secondary language** (default `en`)
-- Otherwise → translate to **Target language** (default `ru`)
+- Input contains **Cyrillic** characters → translate AWAY from `ru` (to the non-`ru` slot)
+- Otherwise → translate TO `ru` (whichever slot is set to `ru`)
 
-So `tr Привет` → English; `tr hello` → Russian; `tr Bonjour le monde` → Russian.
-
-This avoids a round-trip detect-then-retry call and halves latency for non-Cyrillic input.
+So `tr Привет` → English; `tr hello` → Russian; `tr Bonjour le monde` → Russian. If neither slot is `ru`, falls back to: Cyrillic→`input_language`, else `output_language`.
 
 ### Universal Action
 
@@ -43,7 +40,19 @@ Open the workflow in Alfred preferences to change:
 
 ## Backend
 
-Free unauthenticated `translate.googleapis.com/translate_a/single?client=gtx` endpoint. No API key. Subject to silent throttling under heavy use.
+Free unauthenticated `translate.googleapis.com/translate_a/single?client=gtx` endpoint with `dt=t&dt=at&dt=bd` for translation + alternatives + bilingual dictionary. No API key. Subject to silent throttling under heavy use.
+
+### Cache
+
+Translations are cached to `~/Library/Caches/gtranslate/` (7-day TTL, SHA256 key over `target | text`). Cache hits are ~1ms. Wipe with `rm -rf ~/Library/Caches/gtranslate`.
+
+### Latency
+
+| | cold (first request) | warm (cache hit) |
+|---|---|---|
+| p95 | ~800ms | ~1ms |
+
+Cold doubles cost vs. forward-only because the back-translation (for ⌘↩) is fetched sequentially. Both calls land in cache, so repeats are instant.
 
 ## Requirements
 

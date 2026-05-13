@@ -9,28 +9,31 @@ import main  # noqa: E402
 @unittest.skipUnless(os.environ.get("LIVE_TESTS") == "1", "set LIVE_TESTS=1 to run")
 class TestLive(unittest.TestCase):
     def test_ru_to_en(self):
-        lang, out = main.Translate("en").get_translation("Привет мир")
-        self.assertEqual(lang, "ru")
-        self.assertTrue(out and out[0])
-        self.assertIn("ello", out[0].lower())
+        r = main.Translate("en").get_translation("Привет мир")
+        self.assertEqual(r["src"], "ru")
+        self.assertIn("ello", r["text"].lower())
 
     def test_en_to_ru(self):
-        lang, out = main.Translate("ru").get_translation("hello world")
-        self.assertEqual(lang, "en")
-        self.assertTrue(out and out[0])
-        self.assertTrue(main.CYRILLIC_RE.search(out[0]))
+        r = main.Translate("ru").get_translation("hello world")
+        self.assertEqual(r["src"], "en")
+        self.assertTrue(main.CYRILLIC_RE.search(r["text"]))
 
     def test_main_entry_latin(self):
         os.environ["output_language"] = "ru"
         os.environ["input_language"] = "en"
         result = main.main_entry("hello world")
-        self.assertIn("Привет", result + "")  # rough check; output is JSON
+        self.assertIn("Привет", result)
 
     def test_main_entry_cyrillic(self):
         os.environ["output_language"] = "ru"
         os.environ["input_language"] = "en"
         result = main.main_entry("Привет мир")
         self.assertIn("ello", result.lower())
+
+    def test_single_word_returns_alternatives(self):
+        r = main.Translate("ru").get_translation("hello")
+        self.assertTrue(r["alternatives"] or r["dict"],
+                        "single common word should return alternatives or dict entries")
 
 
 if __name__ == "__main__":
