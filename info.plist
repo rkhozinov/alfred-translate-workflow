@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>bundleid</key>
-	<string>dev.nikitadev.translate</string>
+	<string>com.rkhozinov.alfred.quick-translate</string>
 	<key>connections</key>
 	<dict>
 		<key>106F3E8A-2E39-4271-926D-A914AB923F97</key>
@@ -96,7 +96,7 @@
 	<key>disabled</key>
 	<false/>
 	<key>name</key>
-	<string>Translate</string>
+	<string>Quick Translate</string>
 	<key>objects</key>
 	<array>
 		<dict>
@@ -1437,7 +1437,7 @@ By default, translate any language to Russian, setup your language in the **work
 			<key>config</key>
 			<dict>
 				<key>default</key>
-				<string>translate</string>
+				<string>tr</string>
 				<key>placeholder</key>
 				<string></string>
 				<key>required</key>

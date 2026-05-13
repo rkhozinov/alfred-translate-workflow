@@ -7,6 +7,9 @@ import random
 import http.client
 import sys
 import os
+import re
+
+CYRILLIC_RE = re.compile(r'[Ѐ-ӿԀ-ԯ]')
 
 
 class Translate:
@@ -184,15 +187,16 @@ class Translate:
 
     def _get_request(self, text):
         url, path = self._generate_url(text)
-        conn = http.client.HTTPSConnection(url)
-        headers = {
-            "User-Agent": self._get_user_agent(),
-        }
-        conn.request("GET", path, headers=headers)
-        res = conn.getresponse()
-        if res.status != 200:
-            raise RuntimeError(f"HTTP Error: {res.status}")
-        return json.loads(res.read())
+        conn = http.client.HTTPSConnection(url, timeout=5)
+        try:
+            headers = {"User-Agent": self._get_user_agent()}
+            conn.request("GET", path, headers=headers)
+            res = conn.getresponse()
+            if res.status != 200:
+                raise RuntimeError(f"HTTP Error: {res.status}")
+            return json.loads(res.read())
+        finally:
+            conn.close()
 
     def _parse_response(self, data: List) -> tuple:
         translated_text = ''.join([segment[0] for segment in data[0] if segment[0]])
@@ -216,15 +220,17 @@ def generate_worflow_output(translations: List[str]):
     }, ensure_ascii=False)
 
 
-if __name__ == "__main__":
-    text_list = sys.argv[1:]
+def pick_target(text: str, out_lang: str, in_lang: str) -> str:
+    return in_lang if CYRILLIC_RE.search(text) else out_lang
+
+
+def main_entry(text: str) -> str:
     out_lang = os.environ["output_language"]
     in_lang = os.environ["input_language"]
+    target = pick_target(text, out_lang, in_lang)
+    _, translate = Translate(target).get_translation(text)
+    return generate_worflow_output(translate)
 
-    recognised_lang, translate = Translate(
-        out_lang).get_translation(' '.join(text_list))
-    if recognised_lang == out_lang:
-        _, translate = Translate(
-            in_lang).get_translation(' '.join(text_list))
 
-    print(generate_worflow_output(translate))
+if __name__ == "__main__":
+    print(main_entry(' '.join(sys.argv[1:])))
