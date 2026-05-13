@@ -90,7 +90,7 @@
 		</array>
 	</dict>
 	<key>createdby</key>
-	<string>Nikita Meshchaninov</string>
+	<string>Ruslan Khozinov</string>
 	<key>description</key>
 	<string>Translate text or words to selected language</string>
 	<key>disabled</key>
@@ -1460,6 +1460,6 @@ By default, translate any language to Russian, setup your language in the **work
 	<key>version</key>
 	<string>1.0.0</string>
 	<key>webaddress</key>
-	<string>https://nikita.ninja</string>
+	<string>https://github.com/rkhozinov/alfred-translate-workflow</string>
 </dict>
 </plist>
