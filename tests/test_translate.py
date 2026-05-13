@@ -1,11 +1,17 @@
 import json
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import main  # noqa: E402
+import pathlib  # noqa: E402
+
+# Isolate test cache writes
+_TMP_CACHE = tempfile.mkdtemp(prefix="gtranslate-test-")
+main.CACHE_DIR = pathlib.Path(_TMP_CACHE)
 
 
 class TestCyrillicDetect(unittest.TestCase):
@@ -67,38 +73,26 @@ class TestPickTarget(unittest.TestCase):
 
 
 class TestParseResponse(unittest.TestCase):
-    def test_single_segment(self):
+    def test_clients5_array_shape(self):
         t = main.Translate("en")
-        data = [[["Hello", "Привет", None, None, 1]], None, "ru"]
+        data = [["Hello", "ru"]]
         lang, out = t._parse_response(data)
         self.assertEqual(lang, "ru")
         self.assertEqual(out, ["Hello"])
 
-    def test_multi_segment_joined(self):
+    def test_clients5_dict_shape(self):
         t = main.Translate("en")
-        data = [
-            [
-                ["Hello ", "Привет ", None, None, 1],
-                ["world", "мир", None, None, 1],
-            ],
-            None,
-            "ru",
-        ]
-        _, out = t._parse_response(data)
+        data = {"sentences": [{"trans": "Hello ", "orig": "Привет "},
+                              {"trans": "world", "orig": "мир"}],
+                "src": "ru"}
+        lang, out = t._parse_response(data)
+        self.assertEqual(lang, "ru")
         self.assertEqual(out, ["Hello world"])
 
-    def test_empty_segments_skipped(self):
+    def test_unknown_shape(self):
         t = main.Translate("en")
-        data = [
-            [
-                ["Hello", None, None, None, 1],
-                [None, None, None, None, 1],
-            ],
-            None,
-            "ru",
-        ]
-        _, out = t._parse_response(data)
-        self.assertEqual(out, ["Hello"])
+        lang, out = t._parse_response("garbage")
+        self.assertEqual(lang, "unknown")
 
 
 class TestLanguageValidation(unittest.TestCase):
@@ -126,27 +120,77 @@ class TestSingleHTTPCall(unittest.TestCase):
     def setUp(self):
         os.environ["output_language"] = "ru"
         os.environ["input_language"] = "en"
+        # fresh cache per test
+        for f in main.CACHE_DIR.glob("*.json"):
+            f.unlink()
 
     def _mock_response(self, text):
-        return [[[text + "_MOCKED", text, None, None, 1]], None, "xx"]
+        return [[text + "_MOCKED", "xx"]]
 
     def test_latin_input_one_call_to_out_lang(self):
         with patch.object(main.Translate, "_get_request") as mock_req:
             mock_req.return_value = self._mock_response("hello")
             with patch.object(main.Translate, "__init__", side_effect=main.Translate.__init__, autospec=True) as mock_init:
-                main.main_entry("hello world")
+                main.main_entry("hello world unique-A")
                 langs = [call.args[1] for call in mock_init.call_args_list]
-                self.assertEqual(langs, ["ru"], "Latin input must hit out_lang=ru exactly once")
+                self.assertEqual(langs, ["ru"])
             self.assertEqual(mock_req.call_count, 1)
 
     def test_cyrillic_input_one_call_to_in_lang(self):
         with patch.object(main.Translate, "_get_request") as mock_req:
             mock_req.return_value = self._mock_response("Привет")
             with patch.object(main.Translate, "__init__", side_effect=main.Translate.__init__, autospec=True) as mock_init:
-                main.main_entry("Привет мир")
+                main.main_entry("Привет мир unique-B")
                 langs = [call.args[1] for call in mock_init.call_args_list]
-                self.assertEqual(langs, ["en"], "Cyrillic input must hit in_lang=en exactly once")
+                self.assertEqual(langs, ["en"])
             self.assertEqual(mock_req.call_count, 1)
+
+
+class TestCache(unittest.TestCase):
+    def setUp(self):
+        os.environ["output_language"] = "ru"
+        os.environ["input_language"] = "en"
+        for f in main.CACHE_DIR.glob("*.json"):
+            f.unlink()
+
+    def test_second_call_uses_cache(self):
+        with patch.object(main.Translate, "_get_request") as mock_req:
+            mock_req.return_value = [["Привет, мир", "en"]]
+            main.main_entry("hello world cache-test")
+            main.main_entry("hello world cache-test")
+            self.assertEqual(mock_req.call_count, 1, "second call must hit cache")
+
+    def test_different_text_misses(self):
+        with patch.object(main.Translate, "_get_request") as mock_req:
+            mock_req.return_value = [["X", "en"]]
+            main.main_entry("alpha cache-test")
+            main.main_entry("beta cache-test")
+            self.assertEqual(mock_req.call_count, 2)
+
+    def test_different_target_misses(self):
+        # Cache key includes target lang — swap out/in entirely (no ru),
+        # otherwise pick_target routes both configs to the same lang.
+        with patch.object(main.Translate, "_get_request") as mock_req:
+            mock_req.return_value = [["X", "en"]]
+            os.environ["output_language"] = "fr"
+            os.environ["input_language"] = "de"
+            main.main_entry("hello target-A")  # target=fr (Latin, no ru side)
+            os.environ["output_language"] = "de"
+            os.environ["input_language"] = "fr"
+            main.main_entry("hello target-A")  # target=de
+            self.assertEqual(mock_req.call_count, 2)
+
+    def test_ttl_expired(self):
+        import time as _t
+        with patch.object(main.Translate, "_get_request") as mock_req:
+            mock_req.return_value = [["X", "en"]]
+            main.main_entry("ttl text")
+            # backdate cache file
+            for f in main.CACHE_DIR.glob("*.json"):
+                old = _t.time() - (main.CACHE_TTL_SEC + 10)
+                os.utime(f, (old, old))
+            main.main_entry("ttl text")
+            self.assertEqual(mock_req.call_count, 2)
 
 
 if __name__ == "__main__":

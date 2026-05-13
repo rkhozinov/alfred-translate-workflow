@@ -8,8 +8,45 @@ import http.client
 import sys
 import os
 import re
+import hashlib
+import time
+import pathlib
 
 CYRILLIC_RE = re.compile(r'[Ѐ-ӿԀ-ԯ]')
+
+CACHE_DIR = pathlib.Path(os.environ.get(
+    "GTRANSLATE_CACHE_DIR",
+    pathlib.Path.home() / "Library" / "Caches" / "gtranslate",
+))
+CACHE_TTL_SEC = 7 * 24 * 3600
+
+
+def _cache_path(text: str, target: str) -> pathlib.Path:
+    h = hashlib.sha256(f"{target}\x00{text}".encode("utf-8")).hexdigest()
+    return CACHE_DIR / f"{h}.json"
+
+
+def cache_get(text: str, target: str):
+    p = _cache_path(text, target)
+    try:
+        if time.time() - p.stat().st_mtime > CACHE_TTL_SEC:
+            return None
+        with p.open("rb") as f:
+            return json.loads(f.read())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+
+def cache_put(text: str, target: str, payload):
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        p = _cache_path(text, target)
+        tmp = p.with_suffix(".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        tmp.replace(p)
+    except OSError:
+        pass
 
 
 class Translate:
@@ -178,12 +215,10 @@ class Translate:
 
     def _generate_url(self, text):
         text_encoded = urllib.parse.quote(text)
-        return "translate.goo" + \
-            "gleapis.c" + \
-            "om", "/tr" + \
-            "anslate_a" + \
-            "/singl" + \
-            f"e?client=gtx&sl=auto&tl={self.lang}&dt=t&ie=UTF-8&oe=UTF-8&otf=1&ssel=0&tsel=0&kc=7&dt=at&dt=bd&dt=ex&dt=ld&dt=md&dt=qca&dt=rw&dt=rm&dt=ss&q={text_encoded}"
+        return (
+            "clients5.google.com",
+            f"/translate_a/t?client=dict-chrome-ex&sl=auto&tl={self.lang}&q={text_encoded}",
+        )
 
     def _get_request(self, text):
         url, path = self._generate_url(text)
@@ -199,12 +234,24 @@ class Translate:
             conn.close()
 
     def _parse_response(self, data: List) -> tuple:
-        translated_text = ''.join([segment[0] for segment in data[0] if segment[0]])
-        detected_lang = data[2] if len(data) > 2 else "unknown"
-        return detected_lang, [translated_text]
+        # clients5 endpoint shape: [[translation, lang]]  OR  {"sentences":[{"trans":..,"orig":..}],"src":..}
+        if isinstance(data, list) and data and isinstance(data[0], list):
+            translated_text = data[0][0] if data[0] else ""
+            detected_lang = data[0][1] if len(data[0]) > 1 else "unknown"
+            return detected_lang, [translated_text]
+        if isinstance(data, dict) and "sentences" in data:
+            translated_text = "".join(s.get("trans", "") for s in data["sentences"])
+            detected_lang = data.get("src", "unknown")
+            return detected_lang, [translated_text]
+        return "unknown", [""]
 
     def get_translation(self, text: str):
-        return self._parse_response(self._get_request(text))
+        cached = cache_get(text, self.lang)
+        if cached is not None:
+            return tuple(cached)
+        result = self._parse_response(self._get_request(text))
+        cache_put(text, self.lang, list(result))
+        return result
 
 
 def generate_worflow_output(translations: List[str]):
