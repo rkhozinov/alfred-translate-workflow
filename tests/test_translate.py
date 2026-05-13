@@ -51,6 +51,31 @@ class TestPickTarget(unittest.TestCase):
         self.assertEqual(main.pick_target("hello", "fr", "de"), "fr")
 
 
+class TestParseOverride(unittest.TestCase):
+    def test_no_override(self):
+        self.assertEqual(main.parse_override("hello"), (None, "hello"))
+
+    def test_simple_override(self):
+        self.assertEqual(main.parse_override(":de hello world"), ("de", "hello world"))
+
+    def test_uppercase_lowercased(self):
+        self.assertEqual(main.parse_override(":FR bonjour"), ("fr", "bonjour"))
+
+    def test_zh_normalized(self):
+        self.assertEqual(main.parse_override(":zh-cn 你好"), ("zh-CN", "你好"))
+
+    def test_invalid_lang_passthrough(self):
+        # ':xx' looks like an override but xx isn't supported → treat as text
+        self.assertEqual(main.parse_override(":xx hello"), (None, ":xx hello"))
+
+    def test_no_space_no_override(self):
+        # ':de' without trailing space+text is just text
+        self.assertEqual(main.parse_override(":de"), (None, ":de"))
+
+    def test_multiline_text(self):
+        self.assertEqual(main.parse_override(":de hello\nworld"), ("de", "hello\nworld"))
+
+
 class TestReverseTarget(unittest.TestCase):
     def test_swap(self):
         self.assertEqual(main.reverse_target("en", "ru", "en"), "ru")
@@ -210,6 +235,31 @@ class TestMainEntryOutput(unittest.TestCase):
         self.assertFalse(out["items"][0]["valid"])
         os.environ["output_language"] = "ru"
 
+    def test_lang_override_forces_target(self):
+        parsed = {"text": "Hallo", "src": "en", "alternatives": [], "dict": []}
+        captured = {}
+        orig_init = main.Translate.__init__
+
+        def spy_init(self, lang="en"):
+            captured.setdefault("langs", []).append(lang)
+            orig_init(self, lang)
+
+        with patch.object(main.Translate, "_parse_response", return_value=parsed), \
+             patch.object(main.Translate, "_get_request", return_value=[]), \
+             patch.object(main.Translate, "__init__", spy_init):
+            main.main_entry(":de hello override-test")
+            self.assertIn("de", captured["langs"], f"target=de must be used; got {captured['langs']}")
+
+    def test_row_has_ctrl_speak_mod(self):
+        parsed = {"text": "Hello", "src": "ru", "alternatives": [], "dict": []}
+        with patch.object(main.Translate, "_parse_response", return_value=parsed), \
+             patch.object(main.Translate, "_get_request", return_value=[]):
+            out = json.loads(main.main_entry("Привет ctrl-row-test"))
+            row = out["items"][0]
+            self.assertIn("ctrl", row["mods"])
+            self.assertEqual(row["mods"]["ctrl"]["arg"], "Hello")
+            self.assertEqual(row["variables"]["speak_voice"], "Samantha")  # target=en
+
 
 # ---------- Cache ----------
 
@@ -239,6 +289,22 @@ class TestCache(unittest.TestCase):
             n1 = mock_req.call_count
             main.main_entry("beta cache-text")
             self.assertGreater(mock_req.call_count, n1)
+
+    def test_lru_cap_evicts_oldest(self):
+        # Force eviction by setting tiny cap and bypassing probability gate.
+        orig_cap = main.CACHE_MAX_ENTRIES
+        orig_prob = main.CACHE_PRUNE_PROB
+        main.CACHE_MAX_ENTRIES = 3
+        main.CACHE_PRUNE_PROB = 1.0  # always prune
+        try:
+            _clear_cache()
+            for i in range(6):
+                main.cache_put(f"text{i}", "en", {"text": "x", "src": "en"})
+            remaining = list(main.CACHE_DIR.glob("*.json"))
+            self.assertLessEqual(len(remaining), 3, f"expected ≤3, got {len(remaining)}")
+        finally:
+            main.CACHE_MAX_ENTRIES = orig_cap
+            main.CACHE_PRUNE_PROB = orig_prob
 
     def test_ttl_expired(self):
         parsed = {"text": "x", "src": "en", "alternatives": [], "dict": []}

@@ -16,11 +16,37 @@ import traceback
 
 CYRILLIC_RE = re.compile(r'[Ѐ-ӿԀ-ԯ]')
 
+# Voice map for macOS `say`. Falls back to "Samantha" (US English) if lang missing.
+SAY_VOICES = {
+    "ru": "Milena",
+    "en": "Samantha",
+    "fr": "Audrey",
+    "de": "Anna",
+    "es": "Mónica",
+    "it": "Alice",
+    "pt": "Joana",
+    "pl": "Zosia",
+    "ja": "Kyoko",
+    "ko": "Yuna",
+    "zh-CN": "Tingting",
+    "zh-TW": "Meijia",
+    "nl": "Xander",
+    "sv": "Alva",
+    "tr": "Yelda",
+    "ar": "Maged",
+    "he": "Carmit",
+    "hi": "Lekha",
+    "th": "Kanya",
+    "el": "Melina",
+}
+
 CACHE_DIR = pathlib.Path(os.environ.get(
     "GTRANSLATE_CACHE_DIR",
     pathlib.Path.home() / "Library" / "Caches" / "gtranslate",
 ))
 CACHE_TTL_SEC = 7 * 24 * 3600
+CACHE_MAX_ENTRIES = int(os.environ.get("GTRANSLATE_CACHE_MAX", "1000"))
+CACHE_PRUNE_PROB = 0.02  # 2% chance per put to scan + evict
 
 
 def _cache_path(text: str, target: str) -> pathlib.Path:
@@ -39,6 +65,22 @@ def cache_get(text: str, target: str):
         return None
 
 
+def _cache_prune():
+    """Drop oldest entries when over cap. Cheap: stat-sort + unlink overflow."""
+    try:
+        files = list(CACHE_DIR.glob("*.json"))
+        if len(files) <= CACHE_MAX_ENTRIES:
+            return
+        files.sort(key=lambda p: p.stat().st_mtime)
+        for p in files[: len(files) - CACHE_MAX_ENTRIES]:
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
 def cache_put(text: str, target: str, payload):
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -47,6 +89,8 @@ def cache_put(text: str, target: str, payload):
         with tmp.open("w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
         tmp.replace(p)
+        if random.random() < CACHE_PRUNE_PROB:
+            _cache_prune()
     except OSError:
         pass
 
@@ -225,7 +269,7 @@ class Translate:
 
     def _get_request(self, text):
         url, path = self._generate_url(text)
-        conn = http.client.HTTPSConnection(url, timeout=5)
+        conn = http.client.HTTPSConnection(url, timeout=2)
         try:
             headers = {"User-Agent": self._get_user_agent()}
             conn.request("GET", path, headers=headers)
@@ -290,6 +334,26 @@ class Translate:
         return parsed
 
 
+LANG_OVERRIDE_RE = re.compile(r'^:([a-zA-Z-]{2,7})\s+(.+)$', re.DOTALL)
+
+
+def parse_override(text: str) -> Tuple[Optional[str], str]:
+    """Strip leading ':<lang> ' override. Returns (forced_lang_or_None, remaining_text)."""
+    m = LANG_OVERRIDE_RE.match(text)
+    if not m:
+        return None, text
+    lang = m.group(1)
+    # Normalize zh-cn → zh-CN; otherwise lowercase.
+    if "-" in lang:
+        a, b = lang.split("-", 1)
+        lang = f"{a.lower()}-{b.upper()}"
+    else:
+        lang = lang.lower()
+    if lang not in Translate.languages:
+        return None, text  # invalid override → treat as text
+    return lang, m.group(2)
+
+
 def pick_target(text: str, out_lang: str, in_lang: str) -> str:
     cyrillic = bool(CYRILLIC_RE.search(text))
     if out_lang == "ru":
@@ -325,30 +389,27 @@ def build_items(parsed: dict, target: str, back_target: str, back_text: Optional
         "subtitle": back_hint,
         "valid": bool(back_text),
     }
-    items.append({
-        "title": main_text or "(no translation)",
-        "subtitle": arrow,
-        "arg": main_text,
-        "valid": bool(main_text),
-        "mods": {"cmd": cmd_mod},
-    })
+    voice = SAY_VOICES.get(target, "Samantha")
+
+    def row(title: str, subtitle: str, arg: str) -> dict:
+        return {
+            "title": title,
+            "subtitle": subtitle,
+            "arg": arg,
+            "valid": bool(arg),
+            "variables": {"speak_voice": voice},
+            "mods": {
+                "cmd": cmd_mod,
+                "ctrl": {"arg": arg, "subtitle": f"🔊 speak ({voice})", "valid": bool(arg)},
+            },
+        }
+
+    items.append(row(main_text or "(no translation)", arrow, main_text))
     for alt in parsed.get("alternatives", []):
-        items.append({
-            "title": alt,
-            "subtitle": f"alternative · {arrow}",
-            "arg": alt,
-            "valid": True,
-            "mods": {"cmd": cmd_mod},
-        })
+        items.append(row(alt, f"alternative · {arrow}", alt))
     for pos, words in parsed.get("dict", []):
         joined = ", ".join(words)
-        items.append({
-            "title": joined,
-            "subtitle": f"{pos} · {arrow}",
-            "arg": joined,
-            "valid": True,
-            "mods": {"cmd": cmd_mod},
-        })
+        items.append(row(joined, f"{pos} · {arrow}", joined))
     return items
 
 
@@ -371,7 +432,8 @@ def main_entry(text: str) -> str:
     except KeyError as e:
         return error_output("Missing config variable", f"{e}: set in Alfred workflow preferences")
 
-    target = pick_target(text, out_lang, in_lang)
+    forced, text = parse_override(text)
+    target = forced if forced else pick_target(text, out_lang, in_lang)
     back_target = reverse_target(target, out_lang, in_lang)
 
     try:

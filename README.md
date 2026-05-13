@@ -14,6 +14,19 @@ tr <text>
 - <kbd>⇧</kbd><kbd>↩</kbd> — paste translation to the frontmost app
 - <kbd>⌥</kbd><kbd>↩</kbd> — show translation in the Text View
 - <kbd>⌘</kbd><kbd>↩</kbd> — copy back-translation (round-trip sanity check)
+- <kbd>⌃</kbd><kbd>↩</kbd> — speak translation via macOS `say` (voice picked per target lang)
+
+### Force target language
+
+Prefix the query with `:<lang>` to override the smart detection:
+
+```
+tr :de hello world     → Hallo Welt
+tr :es bonjour          → hola
+tr :ja Привет           → こんにちは
+```
+
+If the lang code is unknown, the prefix is treated as plain text.
 
 Each row's subtitle shows `<detected_src> → <target>`. Alternatives and dictionary entries appear as extra rows below the main translation when the source is a single word or short phrase.
 
@@ -44,7 +57,7 @@ Free unauthenticated `translate.googleapis.com/translate_a/single?client=gtx` en
 
 ### Cache
 
-Translations are cached to `~/Library/Caches/gtranslate/` (7-day TTL, SHA256 key over `target | text`). Cache hits are ~1ms. Wipe with `rm -rf ~/Library/Caches/gtranslate`.
+Translations are cached to `~/Library/Caches/gtranslate/` (7-day TTL, SHA256 key over `target | text`). Cache hits are ~1ms. Capped at 1000 entries by default — oldest entries are evicted probabilistically when the cap is exceeded. Override via `GTRANSLATE_CACHE_MAX` env var. Wipe with `rm -rf ~/Library/Caches/gtranslate`.
 
 ### Latency
 
